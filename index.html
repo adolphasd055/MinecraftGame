@@ -1,0 +1,1395 @@
+```html
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>麥塊 3D 第三人稱射擊遊戲</title>
+    <!-- 引入 Tailwind CSS 進行精美 UI 排版 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        /* 引入像素風字型 */
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+        
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #000;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none;
+        }
+
+        .pixel-font {
+            font-family: 'Press Start 2P', monospace;
+        }
+
+        /* 麥塊經典按鈕風格 */
+        .mc-button {
+            image-rendering: pixelated;
+            border: 4px solid #000000;
+            background: #4a4a4a;
+            box-shadow: inset -4px -4px #212121, inset 4px 4px #8a8a8a;
+            color: #ffffff;
+            text-shadow: 2px 2px #000000;
+            transition: all 0.1s ease;
+        }
+        .mc-button:active {
+            box-shadow: inset 4px 4px #212121, inset -4px -4px #8a8a8a;
+            transform: translateY(2px);
+        }
+        .mc-button-green {
+            border: 4px solid #000000;
+            background: #5c8e32;
+            box-shadow: inset -4px -4px #3e6320, inset 4px 4px #82be4b;
+        }
+        .mc-button-green:active {
+            box-shadow: inset 4px 4px #3e6320, inset -4px -4px #82be4b;
+        }
+        .mc-button-red {
+            border: 4px solid #000000;
+            background: #b02e26;
+            box-shadow: inset -4px -4px #7a1d18, inset 4px 4px #df5c53;
+        }
+        .mc-button-red:active {
+            box-shadow: inset 4px 4px #7a1d18, inset -4px -4px #df5c53;
+        }
+    </style>
+</head>
+<body class="w-full h-screen relative flex items-center justify-center">
+
+    <!-- 遊戲 3D 渲染區域 -->
+    <div id="game-container" class="absolute inset-0 w-full h-full z-0"></div>
+
+    <!-- UI Overlay: 受傷紅屏效果 -->
+    <div id="damage-flash" class="absolute inset-0 bg-red-600/30 opacity-0 pointer-events-none z-10 transition-opacity duration-150"></div>
+
+    <!-- HUD (抬頭顯示器) -->
+    <div id="hud" class="absolute top-0 left-0 w-full p-4 flex justify-between items-start z-20 pointer-events-none select-none hidden">
+        <!-- 生命值與分數 -->
+        <div class="flex flex-col gap-2">
+            <!-- 生命值條 -->
+            <div class="flex items-center gap-2 bg-black/60 p-3 rounded-none border-2 border-neutral-700 pointer-events-auto">
+                <span class="pixel-font text-xs text-red-500">HP:</span>
+                <div class="w-48 bg-neutral-800 h-6 border border-neutral-600 p-0.5 relative">
+                    <div id="hp-bar" class="bg-red-600 h-full w-full transition-all duration-100"></div>
+                </div>
+                <span id="hp-text" class="pixel-font text-xs text-white">100</span>
+            </div>
+            <!-- 分數 -->
+            <div class="bg-black/60 p-3 border-2 border-neutral-700 text-yellow-400 pixel-font text-xs flex flex-col gap-1 pointer-events-auto">
+                <div>SCORE: <span id="score-val" class="text-white">0</span></div>
+                <div>WAVE: <span id="wave-val" class="text-green-400">1</span></div>
+            </div>
+        </div>
+
+        <!-- 右上角系統選項 -->
+        <div class="flex gap-2 pointer-events-auto">
+            <!-- 靜音按鈕 -->
+            <button id="sound-btn" class="w-12 h-12 mc-button flex items-center justify-center text-xl">
+                🔊
+            </button>
+            <!-- 最高分紀錄 -->
+            <div class="bg-black/60 p-3 border-2 border-neutral-700 text-neutral-300 pixel-font text-[10px] text-right flex flex-col justify-center">
+                <div>HI-SCORE</div>
+                <div id="high-score-val" class="text-yellow-400 font-bold mt-1">0</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 波次提示通知 (Wave Title Banner) -->
+    <div id="wave-banner" class="absolute transform -translate-y-1/2 left-0 w-full flex flex-col items-center justify-center z-20 pointer-events-none select-none opacity-0 transition-opacity duration-500 top-1/3">
+        <div class="bg-black/80 px-8 py-4 border-y-4 border-yellow-500 text-center">
+            <h2 id="wave-banner-title" class="pixel-font text-2xl md:text-4xl text-yellow-500 tracking-wider">WAVE 1</h2>
+            <p id="wave-banner-sub" class="pixel-font text-xs text-white mt-2">苦力怕大軍正在逼近...</p>
+        </div>
+    </div>
+
+    <!-- 手機/觸控專用虛擬搖桿 & 控制器 -->
+    <div id="touch-controls" class="absolute bottom-6 left-0 w-full px-6 flex justify-between items-end z-20 select-none pointer-events-none hidden">
+        <!-- 左側移動與旋轉 (十字鍵) -->
+        <div class="flex flex-col items-center gap-1 pointer-events-auto">
+            <!-- 前進 -->
+            <button id="btn-forward" class="w-16 h-16 mc-button flex items-center justify-center text-xl font-bold rounded-none">
+                ▲
+            </button>
+            <div class="flex gap-1">
+                <!-- 左轉 -->
+                <button id="btn-left" class="w-16 h-16 mc-button flex items-center justify-center text-xl font-bold rounded-none">
+                    ◀
+                </button>
+                <!-- 後退 -->
+                <button id="btn-backward" class="w-16 h-16 mc-button flex items-center justify-center text-xl font-bold rounded-none">
+                    ▼
+                </button>
+                <!-- 右轉 -->
+                <button id="btn-right" class="w-16 h-16 mc-button flex items-center justify-center text-xl font-bold rounded-none">
+                    ▶
+                </button>
+            </div>
+            <div class="pixel-font text-[8px] text-white/50 mt-1">控制移動與方向</div>
+        </div>
+
+        <!-- 右側攻擊按鍵 -->
+        <div class="flex flex-col items-center pointer-events-auto">
+            <button id="btn-shoot" class="w-24 h-24 mc-button-red flex flex-col items-center justify-center rounded-none active:scale-95">
+                <span class="text-2xl mb-1">💥</span>
+                <span class="pixel-font text-xs">ATTACK</span>
+            </button>
+            <div class="pixel-font text-[8px] text-white/50 mt-2">發射武器</div>
+        </div>
+    </div>
+
+    <!-- 電腦版操作提示 (畫面最下方微型提示) -->
+    <div id="pc-controls-tip" class="absolute bottom-2 left-1/2 -translate-x-1/2 bg-black/60 px-4 py-1.5 border border-neutral-700 text-neutral-400 pixel-font text-[8px] z-20 pointer-events-none hidden md:block">
+        操作：W 前進 | S 後退 | A、D 旋轉視角 | 空白鍵或滑鼠左鍵 射擊
+    </div>
+
+    <!-- 遊戲開始選單 (Start Menu) -->
+    <div id="start-menu" class="absolute bg-neutral-900/95 border-4 border-black p-8 max-w-lg w-11/12 text-center z-30 flex flex-col items-center gap-6 shadow-2xl">
+        <h1 class="pixel-font text-2xl md:text-3xl text-green-400 drop-shadow-[4px_4px_0px_rgba(0,0,0,1)] leading-snug">
+            MINECRAFT 3D<br>
+            <span class="text-yellow-400 text-lg md:text-xl">第三人稱生存射擊</span>
+        </h1>
+        
+        <p class="pixel-font text-[10px] md:text-xs text-neutral-300 leading-relaxed max-w-sm text-left border-y-2 border-neutral-700 py-4">
+            你被困在基岩包圍的荒野中，無數的苦力怕（Creeper）將會潮水般襲來！拿起你手中的量子脈衝槍，在他們自爆前消滅他們！
+        </p>
+
+        <!-- 遊戲操作說明區 -->
+        <div class="w-full text-left bg-black/50 p-3 border border-neutral-800 text-neutral-400 pixel-font text-[8px] md:text-[9px] flex flex-col gap-2">
+            <div class="text-green-400 text-xs font-bold mb-1">🎮 操作指南：</div>
+            <div>👉 鍵盤玩家：W 前進、S 後退、A/D 旋轉、空白鍵 射擊</div>
+            <div>👉 行動玩家：使用螢幕兩側的虛擬按鍵</div>
+            <div>👉 玩法提示：苦力怕靠近你會閃爍自爆，保持移動是生存密碼！</div>
+        </div>
+
+        <button id="start-btn" class="w-full py-4 mc-button mc-button-green pixel-font text-sm font-bold tracking-widest">
+            開始遊戲 START
+        </button>
+    </div>
+
+    <!-- 遊戲結束選單 (Game Over Menu) -->
+    <div id="game-over-menu" class="absolute bg-neutral-900/95 border-4 border-black p-8 max-w-lg w-11/12 text-center z-30 flex flex-col items-center gap-6 shadow-2xl hidden">
+        <h1 class="pixel-font text-3xl text-red-500 drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">
+            GAME OVER
+        </h1>
+        <p class="pixel-font text-sm text-neutral-400">你被苦力怕炸碎了！</p>
+        
+        <!-- 分數統計 -->
+        <div class="w-full bg-black/50 p-4 border border-neutral-800 flex flex-col gap-3 my-2">
+            <div class="flex justify-between items-center border-b border-neutral-800 pb-2">
+                <span class="pixel-font text-xs text-neutral-400">最終得分:</span>
+                <span id="final-score" class="pixel-font text-lg text-yellow-400 font-bold">0</span>
+            </div>
+            <div class="flex justify-between items-center">
+                <span class="pixel-font text-xs text-neutral-400">堅持波次:</span>
+                <span id="final-wave" class="pixel-font text-lg text-green-400 font-bold">WAVE 1</span>
+            </div>
+        </div>
+
+        <button id="restart-btn" class="w-full py-4 mc-button mc-button-green pixel-font text-sm font-bold tracking-widest">
+            重新挑戰 RETRY
+        </button>
+    </div>
+
+    <script>
+        // --- 遊戲狀態管理 ---
+        const gameState = {
+            score: 0,
+            highScore: parseInt(localStorage.getItem('mc_tps_highscore')) || 0,
+            health: 100,
+            maxHealth: 100,
+            wave: 1,
+            isPlaying: false,
+            isGameOver: false,
+            soundEnabled: true,
+            keys: {
+                forward: false,
+                backward: false,
+                left: false,
+                right: false,
+                shoot: false
+            }
+        };
+
+        // --- 初始化高分顯示 ---
+        document.getElementById('high-score-val').innerText = gameState.highScore;
+
+        // --- Web Audio API 音效合成引擎 ---
+        let audioCtx = null;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+        }
+
+        function playSound(type) {
+            if (!gameState.soundEnabled) return;
+            initAudio();
+            if (!audioCtx) return;
+
+            try {
+                const now = audioCtx.currentTime;
+                
+                if (type === 'shoot') {
+                    // 能量脈衝射擊聲
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(320, now);
+                    osc.frequency.exponentialRampToValueAtTime(60, now + 0.15);
+                    gain.gain.setValueAtTime(0.1, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+                    osc.connect(gain);
+                    gain.connect(audioCtx.destination);
+                    osc.start();
+                    osc.stop(now + 0.15);
+                } 
+                else if (type === 'hit') {
+                    // 擊中苦力怕的聲音 (微弱鈍擊聲)
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(120, now);
+                    osc.frequency.linearRampToValueAtTime(20, now + 0.1);
+                    gain.gain.setValueAtTime(0.2, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+                    osc.connect(gain);
+                    gain.connect(audioCtx.destination);
+                    osc.start();
+                    osc.stop(now + 0.1);
+                }
+                else if (type === 'explode') {
+                    // 爆炸聲
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(80, now);
+                    osc.frequency.linearRampToValueAtTime(10, now + 0.4);
+                    gain.gain.setValueAtTime(0.3, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+                    osc.connect(gain);
+                    gain.connect(audioCtx.destination);
+                    osc.start();
+                    osc.stop(now + 0.4);
+                }
+                else if (type === 'damage') {
+                    // 經典玩家受傷 "呃" 聲
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(160, now);
+                    osc.frequency.linearRampToValueAtTime(90, now + 0.15);
+                    gain.gain.setValueAtTime(0.35, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+                    osc.connect(gain);
+                    gain.connect(audioCtx.destination);
+                    osc.start();
+                    osc.stop(now + 0.15);
+                }
+                else if (type === 'wave_clear') {
+                    // 勝利/波次清理短旋律
+                    [150, 200, 250].forEach((freq, idx) => {
+                        const osc = audioCtx.createOscillator();
+                        const gain = audioCtx.createGain();
+                        osc.type = 'square';
+                        osc.frequency.setValueAtTime(freq, now + idx * 0.15);
+                        gain.gain.setValueAtTime(0.05, now + idx * 0.15);
+                        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.15 + 0.14);
+                        osc.connect(gain);
+                        gain.connect(audioCtx.destination);
+                        osc.start(now + idx * 0.15);
+                        osc.stop(now + idx * 0.15 + 0.14);
+                    });
+                }
+            } catch (e) {
+                console.warn('Audio play error', e);
+            }
+        }
+
+        // --- 3D 繪圖資源 (Canvas 產生的麥塊風格貼圖) ---
+        function createSteveFace() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 64;
+            canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+            // 基礎膚色
+            ctx.fillStyle = '#fbc093';
+            ctx.fillRect(0, 0, 64, 64);
+            // 頭髮
+            ctx.fillStyle = '#2b160a';
+            ctx.fillRect(0, 0, 64, 16);
+            ctx.fillRect(0, 16, 8, 16);
+            ctx.fillRect(56, 16, 8, 16);
+            // 眼睛
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(8, 32, 16, 8);
+            ctx.fillRect(40, 32, 16, 8);
+            ctx.fillStyle = '#4646b3'; // 藍眼睛
+            ctx.fillRect(16, 32, 8, 8);
+            ctx.fillRect(40, 32, 8, 8);
+            // 鼻子/嘴巴
+            ctx.fillStyle = '#cc7c5c';
+            ctx.fillRect(24, 40, 16, 8);
+            ctx.fillStyle = '#5c2214';
+            ctx.fillRect(24, 48, 16, 8);
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        function createCreeperFace() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 64;
+            canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+            // 經典苦力怕綠色與雜質底色
+            ctx.fillStyle = '#0f8016';
+            ctx.fillRect(0, 0, 64, 64);
+            // 雜色噪點
+            ctx.fillStyle = '#0a5c0e';
+            for (let i = 0; i < 40; i++) {
+                ctx.fillRect(Math.floor(Math.random()*8)*8, Math.floor(Math.random()*8)*8, 8, 8);
+            }
+            // 黑色眼睛
+            ctx.fillStyle = '#111111';
+            ctx.fillRect(8, 16, 16, 16);
+            ctx.fillRect(40, 16, 16, 16);
+            // 嘴巴
+            ctx.fillRect(24, 32, 16, 24);
+            ctx.fillRect(16, 40, 8, 24);
+            ctx.fillRect(40, 40, 8, 24);
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        function createGrassTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 16;
+            canvas.height = 16;
+            const ctx = canvas.getContext('2d');
+            // 基礎草地綠
+            ctx.fillStyle = '#5c8e32';
+            ctx.fillRect(0, 0, 16, 16);
+            // 雜點
+            const colors = ['#4d7828', '#689d3a', '#3e6320'];
+            for (let x = 0; x < 16; x++) {
+                for (let y = 0; y < 16; y++) {
+                    if (Math.random() > 0.6) {
+                        ctx.fillStyle = colors[Math.floor(Math.random() * colors.length)];
+                        ctx.fillRect(x, y, 1, 1);
+                    }
+                }
+            }
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            texture.repeat.set(120, 120);
+            texture.magFilter = THREE.NearestFilter; // 最重要！確保像素風銳利度
+            return texture;
+        }
+
+        // --- Three.js 主架構變數 ---
+        let scene, camera, renderer, clock;
+        let player, creepers = [], bullets = [], particles = [], trees = [], clouds = [];
+        const playerMaxSpeed = 8.0;
+        const playerRotSpeed = 3.0;
+        let shootCooldown = 0;
+        let spawnTimer = 0;
+        let waveActive = false;
+        let countCreepersKilledInWave = 0;
+        let currentWaveTotalCreepers = 0;
+
+        // 預防連續開火鎖定
+        let shootAnimTimer = 0;
+        let isShootingAnim = false;
+
+        // --- 初始化場景 ---
+        function initGameScene() {
+            const container = document.getElementById('game-container');
+            container.innerHTML = ''; // 清空
+
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xb2f0ff); // 水藍色天空
+
+            // 霧氣，增添麥塊地平線神秘感
+            scene.fog = new THREE.FogExp2(0xb2f0ff, 0.015);
+
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            
+            renderer = new THREE.WebGLRenderer({ antialias: false }); // 關閉抗鋸齒以保持像素硬核感
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            container.appendChild(renderer.domElement);
+
+            clock = new THREE.Clock();
+
+            // 燈光
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(40, 60, 20);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 1024;
+            dirLight.shadow.mapSize.height = 1024;
+            dirLight.shadow.camera.near = 0.5;
+            dirLight.shadow.camera.far = 200;
+            const d = 80;
+            dirLight.shadow.camera.left = -d;
+            dirLight.shadow.camera.right = d;
+            dirLight.shadow.camera.top = d;
+            dirLight.shadow.camera.bottom = -d;
+            scene.add(dirLight);
+
+            // 泥土與草地地板
+            const grassTex = createGrassTexture();
+            const floorGeo = new THREE.PlaneGeometry(200, 200);
+            const floorMat = new THREE.MeshLambertMaterial({ map: grassTex });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            floor.receiveShadow = true;
+            scene.add(floor);
+
+            // 生成邊界 (圓形暗灰色基岩牆)
+            createBedrockBorder();
+
+            // 亂數生成裝飾方塊樹
+            spawnDecorations();
+
+            // 初始化玩家
+            player = createPlayer();
+
+            // 初始化雲朵
+            initClouds();
+
+            // 適應視窗
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        // --- 創立玩家模型 (Steve 麥塊比例) ---
+        function createPlayer() {
+            const group = new THREE.Group();
+            group.position.set(0, 0, 0);
+
+            // 材質
+            const skinMat = new THREE.MeshLambertMaterial({ color: 0xfbc093 });
+            const hairMat = new THREE.MeshLambertMaterial({ color: 0x2b160a });
+            const cyanMat = new THREE.MeshLambertMaterial({ color: 0x00cbcb }); // 青色上衣
+            const blueMat = new THREE.MeshLambertMaterial({ color: 0x3c3ca1 }); // 藍色長褲
+            const grayMat = new THREE.MeshLambertMaterial({ color: 0x555555 }); // 灰色鞋子
+
+            // 1. 頭部 (Steve Face 貼前面)
+            const headMats = [];
+            const faceTex = createSteveFace();
+            faceTex.magFilter = THREE.NearestFilter;
+            const faceMat = new THREE.MeshLambertMaterial({ map: faceTex });
+
+            // PX, NX, PY, NY, PZ, NZ (PZ 是前方)
+            headMats.push(skinMat); // 右
+            headMats.push(skinMat); // 左
+            headMats.push(hairMat); // 上
+            headMats.push(skinMat); // 下
+            headMats.push(faceMat); // 前
+            headMats.push(hairMat); // 後
+
+            const headPivot = new THREE.Group();
+            headPivot.position.set(0, 2.7, 0);
+            const headMesh = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.2, 1.2), headMats);
+            headMesh.position.set(0, 0.6, 0); // 相對關節中心
+            headMesh.castShadow = true;
+            headPivot.add(headMesh);
+            group.add(headPivot);
+
+            // 2. 身體
+            const torso = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.8, 0.6), cyanMat);
+            torso.position.set(0, 1.8, 0);
+            torso.castShadow = true;
+            torso.receiveShadow = true;
+            group.add(torso);
+
+            // 3. 左手
+            const leftArmPivot = new THREE.Group();
+            leftArmPivot.position.set(-0.9, 2.5, 0);
+            const leftArm = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.8, 0.5), cyanMat);
+            leftArm.position.set(0, -0.7, 0);
+            leftArm.castShadow = true;
+            leftArmPivot.add(leftArm);
+            group.add(leftArmPivot);
+
+            // 4. 右手 (附帶量子脈衝槍)
+            const rightArmPivot = new THREE.Group();
+            rightArmPivot.position.set(0.9, 2.5, 0);
+            const rightArm = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.8, 0.5), cyanMat);
+            rightArm.position.set(0, -0.7, 0);
+            rightArm.castShadow = true;
+            rightArmPivot.add(rightArm);
+
+            // 量子脈衝槍模型
+            const gunGroup = new THREE.Group();
+            gunGroup.position.set(0, -1.0, 0.3); // 拿在手上
+
+            const gunBody = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.4, 1.4), new THREE.MeshLambertMaterial({ color: 0x333333 }));
+            gunBody.position.set(0, 0, 0.3);
+            gunBody.castShadow = true;
+            gunGroup.add(gunBody);
+
+            // 槍口能量管 (霓虹亮藍色)
+            const gunCore = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.6), new THREE.MeshBasicMaterial({ color: 0x00ffff }));
+            gunCore.position.set(0, 0.05, 0.8);
+            gunGroup.add(gunCore);
+
+            rightArm.add(gunGroup);
+            group.add(rightArmPivot);
+
+            // 5. 左腳
+            const leftLegPivot = new THREE.Group();
+            leftLegPivot.position.set(-0.3, 0.9, 0);
+            const leftLeg = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.4, 0.5), blueMat);
+            leftLeg.position.set(0, -0.5, 0);
+            leftLeg.castShadow = true;
+            leftLegPivot.add(leftLeg);
+            group.add(leftLegPivot);
+
+            // 6. 右腳
+            const rightLegPivot = new THREE.Group();
+            rightLegPivot.position.set(0.3, 0.9, 0);
+            const rightLeg = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.4, 0.5), blueMat);
+            rightLeg.position.set(0, -0.5, 0);
+            rightLeg.castShadow = true;
+            rightLegPivot.add(rightLeg);
+            group.add(rightLegPivot);
+
+            scene.add(group);
+
+            return {
+                group: group,
+                headPivot: headPivot,
+                leftArmPivot: leftArmPivot,
+                rightArmPivot: rightArmPivot,
+                leftLegPivot: leftLegPivot,
+                rightLegPivot: rightLegPivot,
+                gunGroup: gunGroup,
+                position: group.position,
+                rotation: group.rotation
+            };
+        }
+
+        // --- 創立基岩外牆 ---
+        function createBedrockBorder() {
+            const count = 72; // 環形
+            const radius = 70;
+            const geo = new THREE.BoxGeometry(6, 6, 6);
+            const mat = new THREE.MeshLambertMaterial({ color: 0x3a3a3a }); // 暗基岩灰
+
+            for (let i = 0; i < count; i++) {
+                const angle = (i / count) * Math.PI * 2;
+                const x = Math.cos(angle) * radius;
+                const z = Math.sin(angle) * radius;
+
+                const block = new THREE.Mesh(geo, mat);
+                block.position.set(x, 3, z);
+                block.castShadow = true;
+                block.receiveShadow = true;
+                scene.add(block);
+            }
+        }
+
+        // --- 生成樹木裝飾 ---
+        function spawnDecorations() {
+            // 清理舊樹
+            trees.forEach(t => scene.remove(t.mesh));
+            trees = [];
+
+            // 隨機放 30 棵樹
+            for (let i = 0; i < 30; i++) {
+                // 不能太靠近中央起點
+                let x, z, dist;
+                do {
+                    x = Math.random() * 110 - 55;
+                    z = Math.random() * 110 - 55;
+                    dist = Math.sqrt(x*x + z*z);
+                } while (dist < 12);
+
+                const treeGroup = new THREE.Group();
+                treeGroup.position.set(x, 0, z);
+
+                // 樹幹 (1x1x4 咖啡色)
+                const trunk = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.8, 3.5, 0.8),
+                    new THREE.MeshLambertMaterial({ color: 0x5a3d28 })
+                );
+                trunk.position.y = 1.75;
+                trunk.castShadow = true;
+                trunk.receiveShadow = true;
+                treeGroup.add(trunk);
+
+                // 樹葉 (方塊堆疊)
+                const leaves = new THREE.Mesh(
+                    new THREE.BoxGeometry(2.4, 2.4, 2.4),
+                    new THREE.MeshLambertMaterial({ color: 0x2e6f1c })
+                );
+                leaves.position.y = 4.0;
+                leaves.castShadow = true;
+                leaves.receiveShadow = true;
+                treeGroup.add(leaves);
+
+                scene.add(treeGroup);
+
+                // 保存碰撞體半徑
+                trees.push({
+                    mesh: treeGroup,
+                    position: new THREE.Vector3(x, 0, z),
+                    radius: 1.4
+                });
+            }
+        }
+
+        // --- 建立漂浮方塊雲朵 ---
+        function initClouds() {
+            clouds.forEach(c => scene.remove(c.mesh));
+            clouds = [];
+
+            for (let i = 0; i < 12; i++) {
+                const cloudGroup = new THREE.Group();
+                const numBlocks = 3 + Math.floor(Math.random() * 4);
+                const cloudMat = new THREE.MeshBasicMaterial({ 
+                    color: 0xffffff, 
+                    transparent: true, 
+                    opacity: 0.85 
+                });
+
+                for (let j = 0; j < numBlocks; j++) {
+                    const block = new THREE.Mesh(
+                        new THREE.BoxGeometry(4 + Math.random() * 4, 1.5, 4 + Math.random() * 4), 
+                        cloudMat
+                    );
+                    block.position.set(j * 3 - (numBlocks * 1.5), 0, Math.random() * 2 - 1);
+                    cloudGroup.add(block);
+                }
+
+                cloudGroup.position.set(
+                    Math.random() * 140 - 70,
+                    22 + Math.random() * 6,
+                    Math.random() * 140 - 70
+                );
+                scene.add(cloudGroup);
+                clouds.push({
+                    mesh: cloudGroup,
+                    speed: 0.2 + Math.random() * 0.4
+                });
+            }
+        }
+
+        function updateClouds(dt) {
+            clouds.forEach(c => {
+                c.mesh.position.x += c.speed * dt;
+                // 包裝邊界
+                if (c.mesh.position.x > 85) {
+                    c.mesh.position.x = -85;
+                    c.mesh.position.z = Math.random() * 140 - 70;
+                }
+            });
+        }
+
+        // --- 創立 Creeper 苦力怕怪物 ---
+        function spawnCreeper() {
+            // 在玩家外圍環形隨機位置生成
+            const angle = Math.random() * Math.PI * 2;
+            const spawnRadius = 35 + Math.random() * 15;
+            const x = player.position.x + Math.cos(angle) * spawnRadius;
+            const z = player.position.z + Math.sin(angle) * spawnRadius;
+
+            // 確保苦力怕在基岩內部
+            const d = Math.sqrt(x*x + z*z);
+            if (d > 66) return; 
+
+            const group = new THREE.Group();
+            group.position.set(x, 0, z);
+
+            const greenMat = new THREE.MeshLambertMaterial({ color: 0x0f8016 });
+
+            // 1. 頭部 (苦力怕臉貼 PZ 前面)
+            const headMats = [];
+            const creeperFaceTex = createCreeperFace();
+            creeperFaceTex.magFilter = THREE.NearestFilter;
+            const faceMat = new THREE.MeshLambertMaterial({ map: creeperFaceTex });
+
+            for (let i = 0; i < 6; i++) {
+                if (i === 4) headMats.push(faceMat); // 正前方
+                else headMats.push(greenMat);
+            }
+
+            const head = new THREE.Mesh(new THREE.BoxGeometry(1.0, 1.0, 1.0), headMats);
+            head.position.y = 2.1;
+            head.castShadow = true;
+            group.add(head);
+
+            // 2. 身體
+            const body = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.2, 0.45), greenMat);
+            body.position.y = 1.0;
+            body.castShadow = true;
+            body.receiveShadow = true;
+            group.add(body);
+
+            // 3. 4隻腳
+            const legGeo = new THREE.BoxGeometry(0.35, 0.5, 0.35);
+            const legFL = new THREE.Mesh(legGeo, greenMat); legFL.position.set(-0.25, 0.25, 0.25); legFL.castShadow = true; group.add(legFL);
+            const legFR = new THREE.Mesh(legGeo, greenMat); legFR.position.set(0.25, 0.25, 0.25); legFR.castShadow = true; group.add(legFR);
+            const legBL = new THREE.Mesh(legGeo, greenMat); legBL.position.set(-0.25, 0.25, -0.25); legBL.castShadow = true; group.add(legBL);
+            const legBR = new THREE.Mesh(legGeo, greenMat); legBR.position.set(0.25, 0.25, -0.25); legBR.castShadow = true; group.add(legBR);
+
+            scene.add(group);
+
+            creepers.push({
+                mesh: group,
+                legs: [legFL, legFR, legBL, legBR],
+                head: head,
+                health: 2 + Math.floor(gameState.wave * 0.5), // 怪物隨波次血量變厚
+                speed: 2.2 + (gameState.wave * 0.2), // 怪物隨波次速度變快
+                damageBlinkTimer: 0,
+                explodeCountDown: -1, // -1 表示無自爆意圖，大於0時為自爆倒數
+                isAboutToBlow: false
+            });
+        }
+
+        // --- 射擊粒子特效 (Creeper 受傷/死亡爆炸) ---
+        function createExplosionParticles(pos, colorHex) {
+            const particleCount = 18;
+            const geo = new THREE.BoxGeometry(0.25, 0.25, 0.25);
+            const mat = new THREE.MeshBasicMaterial({ color: colorHex });
+
+            for (let i = 0; i < particleCount; i++) {
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.position.copy(pos);
+                mesh.position.y += 0.5; // 爆在中間高度
+                scene.add(mesh);
+
+                particles.push({
+                    mesh: mesh,
+                    velocity: new THREE.Vector3(
+                        (Math.random() - 0.5) * 8,
+                        Math.random() * 6 + 3,
+                        (Math.random() - 0.5) * 8
+                    ),
+                    life: 0.55 // 秒
+                });
+            }
+        }
+
+        // --- 玩家發射能量子彈 ---
+        function fireWeapon() {
+            if (gameState.isGameOver || !gameState.isPlaying) return;
+            if (shootCooldown > 0) return;
+
+            playSound('shoot');
+
+            // 觸發射擊動畫與後座力
+            isShootingAnim = true;
+            shootAnimTimer = 0.25;
+
+            // 計算槍口位置與射擊方向
+            const shootDir = new THREE.Vector3(0, 0, 1);
+            shootDir.applyQuaternion(player.group.quaternion);
+
+            // 槍口本地相對於角色的偏移量
+            const muzzleOffset = new THREE.Vector3(0.9, 1.5, 1.8);
+            muzzleOffset.applyQuaternion(player.group.quaternion);
+            const bulletPos = player.position.clone().add(muzzleOffset);
+
+            // 子彈 3D 模型 (亮藍色方塊)
+            const bulletGeo = new THREE.BoxGeometry(0.2, 0.2, 0.6);
+            const bulletMat = new THREE.MeshBasicMaterial({ color: 0x00ffff });
+            const bulletMesh = new THREE.Mesh(bulletGeo, bulletMat);
+            bulletMesh.position.copy(bulletPos);
+            // 讓子彈配合玩家朝向
+            bulletMesh.quaternion.copy(player.group.quaternion);
+            scene.add(bulletMesh);
+
+            bullets.push({
+                mesh: bulletMesh,
+                direction: shootDir,
+                speed: 36.0,
+                life: 1.8 // 子彈最長射程時間
+            });
+
+            shootCooldown = 0.25; // 限制開火速率 0.25 秒
+        }
+
+        // --- 輸入控制事件綁定 ---
+        function initInputControls() {
+            // 鍵盤
+            window.addEventListener('keydown', (e) => {
+                if (gameState.isGameOver) return;
+                switch(e.code) {
+                    case 'KeyW': case 'ArrowUp': gameState.keys.forward = true; break;
+                    case 'KeyS': case 'ArrowDown': gameState.keys.backward = true; break;
+                    case 'KeyA': case 'ArrowLeft': gameState.keys.left = true; break;
+                    case 'KeyD': case 'ArrowRight': gameState.keys.right = true; break;
+                    case 'Space': 
+                        gameState.keys.shoot = true; 
+                        e.preventDefault(); // 防止網頁下拉
+                        break;
+                }
+            });
+
+            window.addEventListener('keyup', (e) => {
+                switch(e.code) {
+                    case 'KeyW': case 'ArrowUp': gameState.keys.forward = false; break;
+                    case 'KeyS': case 'ArrowDown': gameState.keys.backward = false; break;
+                    case 'KeyA': case 'ArrowLeft': gameState.keys.left = false; break;
+                    case 'KeyD': case 'ArrowRight': gameState.keys.right = false; break;
+                    case 'Space': gameState.keys.shoot = false; break;
+                }
+            });
+
+            // 滑鼠左鍵射擊
+            window.addEventListener('mousedown', (e) => {
+                if (e.target.closest('button') || e.target.closest('#hud')) return;
+                if (gameState.isPlaying && !gameState.isGameOver) {
+                    fireWeapon();
+                }
+            });
+
+            // --- 行動裝置觸控按鈕绑定 ---
+            setupTouchButton('btn-forward', 'forward');
+            setupTouchButton('btn-backward', 'backward');
+            setupTouchButton('btn-left', 'left');
+            setupTouchButton('btn-right', 'right');
+
+            // 攻擊按鈕
+            const shootBtn = document.getElementById('btn-shoot');
+            const triggerShoot = (e) => {
+                e.preventDefault();
+                fireWeapon();
+            };
+            shootBtn.addEventListener('touchstart', triggerShoot);
+            shootBtn.addEventListener('mousedown', triggerShoot);
+        }
+
+        // 輔助設定行動端按鈕持續按壓
+        function setupTouchButton(id, actionKey) {
+            const btn = document.getElementById(id);
+            
+            const pressStart = (e) => {
+                e.preventDefault();
+                gameState.keys[actionKey] = true;
+                btn.classList.add('scale-95');
+            };
+            
+            const pressEnd = (e) => {
+                e.preventDefault();
+                gameState.keys[actionKey] = false;
+                btn.classList.remove('scale-95');
+            };
+
+            btn.addEventListener('touchstart', pressStart);
+            btn.addEventListener('mousedown', pressStart);
+
+            btn.addEventListener('touchend', pressEnd);
+            btn.addEventListener('mouseup', pressEnd);
+            btn.addEventListener('mouseleave', pressEnd);
+        }
+
+        // 靜音按鈕處理
+        document.getElementById('sound-btn').addEventListener('click', () => {
+            gameState.soundEnabled = !gameState.soundEnabled;
+            document.getElementById('sound-btn').innerText = gameState.soundEnabled ? '🔊' : '🔇';
+        });
+
+        // Window resize
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // --- 觸發受傷紅屏閃爍 ---
+        function flashDamageScreen() {
+            const flash = document.getElementById('damage-flash');
+            flash.style.opacity = '1';
+            setTimeout(() => {
+                flash.style.opacity = '0';
+            }, 150);
+        }
+
+        // --- 顯示波次 Banner ---
+        function showWaveBanner(waveNum) {
+            const banner = document.getElementById('wave-banner');
+            document.getElementById('wave-banner-title').innerText = `WAVE ${waveNum}`;
+            const subtitles = [
+                "苦力怕大軍正在逼近...",
+                "它們的速度加快了！",
+                "注意！苦力怕變得更硬了！",
+                "挑戰你的生存極限！",
+                "你有辦法活下去嗎？"
+            ];
+            const sub = subtitles[Math.min(waveNum - 1, subtitles.length - 1)];
+            document.getElementById('wave-banner-sub').innerText = sub;
+
+            banner.classList.remove('hidden');
+            banner.style.opacity = '1';
+            setTimeout(() => {
+                banner.style.opacity = '0';
+            }, 3000);
+        }
+
+        // --- 核心遊戲循環與邏輯處理 ---
+        function gameLoop() {
+            requestAnimationFrame(gameLoop);
+
+            const dt = clock.getDelta();
+
+            // 更新背景雲朵與選單動態
+            updateClouds(dt);
+
+            if (!gameState.isPlaying || gameState.isGameOver) {
+                // 如果在主畫面，讓相機緩慢繞著 Steve 旋轉，營造背景展示感
+                if (camera && player) {
+                    const time = clock.getElapsedTime() * 0.15;
+                    camera.position.x = player.position.x + Math.sin(time) * 12;
+                    camera.position.z = player.position.z + Math.cos(time) * 12;
+                    camera.position.y = 6;
+                    camera.lookAt(player.position.x, player.position.y + 1.2, player.position.z);
+                    renderer.render(scene, camera);
+                }
+                return;
+            }
+
+            // --- 1. 玩家移動與旋轉控制 ---
+            let isMoving = false;
+            let moveDir = 0; // 1 前進, -1 後退
+
+            if (gameState.keys.forward) {
+                moveDir = 1;
+                isMoving = true;
+            } else if (gameState.keys.backward) {
+                moveDir = -1;
+                isMoving = true;
+            }
+
+            // 旋轉角速度
+            if (gameState.keys.left) {
+                player.rotation.y += playerRotSpeed * dt;
+            }
+            if (gameState.keys.right) {
+                player.rotation.y -= playerRotSpeed * dt;
+            }
+
+            // 計算並執行移動
+            if (isMoving) {
+                const direction = new THREE.Vector3(0, 0, 1).applyQuaternion(player.group.quaternion);
+                const nextPos = player.position.clone().addScaledVector(direction, moveDir * playerMaxSpeed * dt);
+
+                // 碰撞檢測 1: 圓形競技場基岩邊界
+                const distFromCenter = Math.sqrt(nextPos.x * nextPos.x + nextPos.z * nextPos.z);
+                let canMove = distFromCenter < 66.5;
+
+                // 碰撞檢測 2: 樹木碰撞
+                if (canMove) {
+                    for (let i = 0; i < trees.length; i++) {
+                        const tree = trees[i];
+                        const distToTree = nextPos.distanceTo(tree.position);
+                        if (distToTree < tree.radius) {
+                            canMove = false;
+                            break;
+                        }
+                    }
+                }
+
+                if (canMove) {
+                    player.position.copy(nextPos);
+                }
+            }
+
+            // --- 2. 玩家動作與射擊姿態動畫 ---
+            const walkFreq = 12.0;
+            const walkAmp = 0.55;
+            if (isMoving) {
+                const walkTimer = clock.getElapsedTime() * walkFreq;
+                // 手腳反向搖擺
+                player.leftLegPivot.rotation.x = Math.sin(walkTimer) * walkAmp;
+                player.rightLegPivot.rotation.x = -Math.sin(walkTimer) * walkAmp;
+                player.leftArmPivot.rotation.x = -Math.sin(walkTimer) * walkAmp;
+                
+                if (!isShootingAnim) {
+                    player.rightArmPivot.rotation.x = Math.sin(walkTimer) * walkAmp;
+                    player.rightArmPivot.rotation.z = 0;
+                }
+            } else {
+                // 站立 pose
+                player.leftLegPivot.rotation.x = 0;
+                player.rightLegPivot.rotation.x = 0;
+                player.leftArmPivot.rotation.x = 0;
+                
+                if (!isShootingAnim) {
+                    player.rightArmPivot.rotation.x = 0;
+                    player.rightArmPivot.rotation.z = 0;
+                }
+            }
+
+            // 射擊動畫與槍口抬起與後座力
+            if (isShootingAnim) {
+                shootAnimTimer -= dt;
+                player.rightArmPivot.rotation.x = -Math.PI / 2 + Math.sin(shootAnimTimer * 20) * 0.15;
+                if (shootAnimTimer <= 0) {
+                    isShootingAnim = false;
+                }
+            }
+
+            // 自動鍵盤連續開火冷卻計時器
+            if (shootCooldown > 0) shootCooldown -= dt;
+            if (gameState.keys.shoot && shootCooldown <= 0) {
+                fireWeapon();
+            }
+
+            // --- 3. 第三人稱相機平滑追隨 (TPS Smooth Follow) ---
+            const relativeCamOffset = new THREE.Vector3(0, 4.2, -6.8); // 稍微高於頭部，在身後
+            const camTargetPos = relativeCamOffset.applyMatrix4(player.group.matrixWorld);
+
+            camera.position.lerp(camTargetPos, 0.1);
+            camera.lookAt(player.position.x, player.position.y + 1.2, player.position.z);
+
+            // --- 4. 苦力怕 AI 行為與移動邏輯 ---
+            for (let i = creepers.length - 1; i >= 0; i--) {
+                const creeper = creepers[i];
+
+                // 受傷閃紅定時器
+                if (creeper.damageBlinkTimer > 0) {
+                    creeper.damageBlinkTimer -= dt;
+                    if (creeper.damageBlinkTimer <= 0) {
+                        creeper.mesh.traverse(child => {
+                            if (child.isMesh && child.material) {
+                                if (Array.isArray(child.material)) {
+                                    child.material.forEach(m => m.color.setHex(0xffffff));
+                                } else {
+                                    child.material.color.setHex(0xffffff);
+                                }
+                            }
+                        });
+                    }
+                }
+
+                // 苦力怕朝向玩家
+                const toPlayer = player.position.clone().sub(creeper.mesh.position);
+                toPlayer.y = 0; 
+                const distToPlayer = toPlayer.length();
+
+                const angle = Math.atan2(toPlayer.x, toPlayer.z);
+                creeper.mesh.rotation.y = angle;
+
+                // 爬行移動動畫與實際位移
+                if (creeper.explodeCountDown < 0) {
+                    const dir = toPlayer.clone().normalize();
+                    const nextCreeperPos = creeper.mesh.position.clone().addScaledVector(dir, creeper.speed * dt);
+
+                    let creeperCanMove = true;
+                    for (let t = 0; t < trees.length; t++) {
+                        const tree = trees[t];
+                        const distToTree = nextCreeperPos.distanceTo(tree.position);
+                        if (distToTree < (tree.radius + 0.4)) {
+                            creeperCanMove = false;
+                            break;
+                        }
+                    }
+
+                    if (creeperCanMove) {
+                        creeper.mesh.position.copy(nextCreeperPos);
+                    }
+
+                    // 爬行動畫
+                    const creepTimer = clock.getElapsedTime() * 15;
+                    const legAmp = 0.5;
+                    creeper.legs[0].rotation.x = Math.sin(creepTimer) * legAmp;
+                    creeper.legs[3].rotation.x = Math.sin(creepTimer) * legAmp;
+                    creeper.legs[1].rotation.x = -Math.sin(creepTimer) * legAmp;
+                    creeper.legs[2].rotation.x = -Math.sin(creepTimer) * legAmp;
+                }
+
+                // --- 苦力怕自爆邏輯 ---
+                if (distToPlayer < 2.5 && creeper.explodeCountDown < 0) {
+                    creeper.explodeCountDown = 1.0; 
+                    creeper.isAboutToBlow = true;
+                    playSound('damage'); 
+                }
+
+                // 處理爆倒計時與閃爍
+                if (creeper.explodeCountDown > 0) {
+                    creeper.explodeCountDown -= dt;
+
+                    const flashSpeed = creeper.explodeCountDown < 0.3 ? 24 : 12;
+                    const flashState = Math.floor(clock.getElapsedTime() * flashSpeed) % 2 === 0;
+                    
+                    creeper.mesh.traverse(child => {
+                        if (child.isMesh && child.material) {
+                            const mats = Array.isArray(child.material) ? child.material : [child.material];
+                            mats.forEach(m => {
+                                if (flashState) {
+                                    m.color.setHex(0xff0000); 
+                                } else {
+                                    m.color.setHex(0xffffff); 
+                                }
+                            });
+                        }
+                    });
+
+                    // 爆炸觸發！
+                    if (creeper.explodeCountDown <= 0) {
+                        scene.remove(creeper.mesh);
+                        creepers.splice(i, 1);
+
+                        createExplosionParticles(creeper.mesh.position, 0x0f8016);
+                        playSound('explode');
+
+                        const finalDist = player.position.distanceTo(creeper.mesh.position);
+                        if (finalDist < 3.8) {
+                            const damage = Math.floor(25 * (1 - (finalDist / 3.8)));
+                            damagePlayer(damage);
+                        }
+
+                        countCreepersKilledInWave++;
+                        checkWaveProgress();
+                        continue;
+                    }
+                } else if (distToPlayer > 3.8 && creeper.explodeCountDown > 0) {
+                    creeper.explodeCountDown = -1;
+                    creeper.isAboutToBlow = false;
+                }
+            }
+
+            // --- 5. 子彈移動與碰撞檢測 ---
+            for (let b = bullets.length - 1; b >= 0; b--) {
+                const bullet = bullets[b];
+                bullet.life -= dt;
+
+                bullet.mesh.position.addScaledVector(bullet.direction, bullet.speed * dt);
+
+                let destroyed = false;
+
+                if (bullet.life <= 0) {
+                    destroyed = true;
+                }
+
+                // 碰撞檢測：子彈與樹木
+                if (!destroyed) {
+                    for (let t = 0; t < trees.length; t++) {
+                        const tree = trees[t];
+                        const distToTree = bullet.mesh.position.distanceTo(tree.position);
+                        if (distToTree < (tree.radius - 0.2)) {
+                            destroyed = true;
+                            createExplosionParticles(bullet.mesh.position, 0x2e6f1c);
+                            break;
+                        }
+                    }
+                }
+
+                // 碰撞檢測：子彈與苦力怕
+                if (!destroyed) {
+                    for (let c = creepers.length - 1; c >= 0; c--) {
+                        const creeper = creepers[c];
+                        const creeperCenter = creeper.mesh.position.clone().add(new THREE.Vector3(0, 1.2, 0));
+                        const dist = bullet.mesh.position.distanceTo(creeperCenter);
+
+                        if (dist < 1.1) {
+                            destroyed = true;
+                            playSound('hit');
+
+                            creeper.health -= 1;
+                            creeper.damageBlinkTimer = 0.15;
+                            
+                            creeper.mesh.traverse(child => {
+                                if (child.isMesh && child.material) {
+                                    const mats = Array.isArray(child.material) ? child.material : [child.material];
+                                    mats.forEach(m => m.color.setHex(0xff3333));
+                                }
+                            });
+
+                            const pushBack = bullet.direction.clone().multiplyScalar(0.4);
+                            creeper.mesh.position.add(pushBack);
+
+                            if (creeper.health <= 0) {
+                                createExplosionParticles(creeper.mesh.position, 0x0f8016);
+                                playSound('explode');
+                                scene.remove(creeper.mesh);
+                                creepers.splice(c, 1);
+
+                                gameState.score += 100 * gameState.wave;
+                                document.getElementById('score-val').innerText = gameState.score;
+
+                                countCreepersKilledInWave++;
+                                checkWaveProgress();
+                            }
+                            break;
+                        }
+                    }
+                }
+
+                if (destroyed) {
+                    scene.remove(bullet.mesh);
+                    bullets.splice(b, 1);
+                }
+            }
+
+            // --- 6. 爆炸碎屑粒子生命週期計算 ---
+            for (let p = particles.length - 1; p >= 0; p--) {
+                const part = particles[p];
+                part.life -= dt;
+
+                part.velocity.y -= 9.8 * dt; 
+                part.mesh.position.addScaledVector(part.velocity, dt);
+
+                if (part.mesh.position.y < 0.1) {
+                    part.mesh.position.y = 0.1;
+                    part.velocity.set(0, 0, 0);
+                }
+
+                const scale = part.life / 0.55;
+                part.mesh.scale.set(scale, scale, scale);
+
+                if (part.life <= 0) {
+                    scene.remove(part.mesh);
+                    particles.splice(p, 1);
+                }
+            }
+
+            // --- 7. 生存波次生怪邏輯 ---
+            if (waveActive && creepers.length < (2 + gameState.wave)) {
+                spawnTimer += dt;
+                const nextSpawnLimit = Math.max(1.0, 3.0 - gameState.wave * 0.2);
+                if (spawnTimer >= nextSpawnLimit) {
+                    const spawnedCountSoFar = creepers.length + countCreepersKilledInWave;
+                    if (spawnedCountSoFar < currentWaveTotalCreepers) {
+                        spawnCreeper();
+                        spawnTimer = 0;
+                    }
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // --- 處理玩家傷害與死亡判斷 ---
+        function damagePlayer(amount) {
+            if (gameState.isGameOver || !gameState.isPlaying) return;
+
+            gameState.health -= amount;
+            if (gameState.health < 0) gameState.health = 0;
+
+            playSound('damage');
+            flashDamageScreen();
+
+            document.getElementById('hp-bar').style.width = `${gameState.health}%`;
+            document.getElementById('hp-text').innerText = gameState.health;
+
+            if (gameState.health <= 0) {
+                endGame();
+            }
+        }
+
+        // --- 波次推進檢查 ---
+        function checkWaveProgress() {
+            if (countCreepersKilledInWave >= currentWaveTotalCreepers) {
+                waveActive = false;
+                playSound('wave_clear');
+                
+                setTimeout(() => {
+                    startNextWave();
+                }, 3000);
+            }
+        }
+
+        // --- 啟動下一個波次 ---
+        function startNextWave() {
+            if (gameState.isGameOver) return;
+
+            gameState.wave += 1;
+            document.getElementById('wave-val').innerText = gameState.wave;
+
+            bullets.forEach(b => scene.remove(b.mesh));
+            bullets = [];
+
+            currentWaveTotalCreepers = 3 + (gameState.wave * 2);
+            countCreepersKilledInWave = 0;
+            spawnTimer = 0;
+            waveActive = true;
+
+            showWaveBanner(gameState.wave);
+        }
+
+        // --- 啟動新遊戲 ---
+        function startGame() {
+            initAudio();
+            gameState.isPlaying = true;
+            gameState.isGameOver = false;
+            gameState.score = 0;
+            gameState.health = 100;
+            gameState.wave = 1;
+
+            document.getElementById('score-val').innerText = '0';
+            document.getElementById('wave-val').innerText = '1';
+            document.getElementById('hp-bar').style.width = '100%';
+            document.getElementById('hp-text').innerText = '100';
+
+            document.getElementById('start-menu').classList.add('hidden');
+            document.getElementById('game-over-menu').classList.add('hidden');
+            document.getElementById('hud').classList.remove('hidden');
+            document.getElementById('touch-controls').classList.remove('hidden');
+
+            player.group.position.set(0, 0, 0);
+            player.group.rotation.set(0, 0, 0);
+            camera.position.set(0, 4.2, -6.8);
+
+            creepers.forEach(c => scene.remove(c.mesh));
+            creepers = [];
+            bullets.forEach(b => scene.remove(b.mesh));
+            bullets = [];
+            particles.forEach(p => scene.remove(p.mesh));
+            particles = [];
+
+            spawnDecorations();
+
+            currentWaveTotalCreepers = 3 + (gameState.wave * 2);
+            countCreepersKilledInWave = 0;
+            spawnTimer = 0;
+            waveActive = true;
+
+            showWaveBanner(1);
+        }
+
+        // --- 遊戲結束 ---
+        function endGame() {
+            gameState.isPlaying = false;
+            gameState.isGameOver = true;
+
+            if (gameState.score > gameState.highScore) {
+                gameState.highScore = gameState.score;
+                localStorage.setItem('mc_tps_highscore', gameState.highScore);
+                document.getElementById('high-score-val').innerText = gameState.highScore;
+            }
+
+            document.getElementById('final-score').innerText = gameState.score;
+            document.getElementById('final-wave').innerText = `WAVE ${gameState.wave}`;
+
+            document.getElementById('game-over-menu').classList.remove('hidden');
+            document.getElementById('hud').classList.add('hidden');
+            document.getElementById('touch-controls').classList.add('hidden');
+        }
+
+        // --- 網頁載入後啟動 ---
+        window.addEventListener('load', () => {
+            initGameScene();
+            initInputControls();
+
+            document.getElementById('start-btn').addEventListener('click', startGame);
+            document.getElementById('restart-btn').addEventListener('click', startGame);
+
+            gameLoop();
+        });
+    </script>
+</body>
+</html>
+
+```
